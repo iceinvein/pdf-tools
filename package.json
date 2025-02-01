@@ -1,0 +1,41 @@
+{
+	"name": "pdf-tools",
+	"private": true,
+	"version": "0.0.0",
+	"type": "module",
+	"scripts": {
+		"dev": "bunx --bun vite",
+		"build": "tsc -b && bunx --bun vite build",
+		"lint": "biome check --write  ./src",
+		"preview": "vite preview"
+	},
+	"dependencies": {
+		"@fontsource/roboto": "^5.1.1",
+		"@radix-ui/react-slot": "^1.1.1",
+		"class-variance-authority": "^0.7.1",
+		"clsx": "^2.1.1",
+		"lucide-react": "^0.474.0",
+		"next-themes": "^0.4.4",
+		"pdf-lib": "^1.17.1",
+		"pdfjs-dist": "^4.10.38",
+		"react": "^18.3.1",
+		"react-dom": "^18.3.1",
+		"sonner": "^1.7.4",
+		"tailwind-merge": "^3.0.1",
+		"tailwindcss-animate": "^1.0.7"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "1.9.4",
+		"@types/node": "^22.10.10",
+		"@types/pdfjs-dist": "^2.10.378",
+		"@types/react": "^18.3.18",
+		"@types/react-dom": "^18.3.5",
+		"@vitejs/plugin-react-swc": "^3.5.0",
+		"autoprefixer": "^10.4.20",
+		"globals": "^15.14.0",
+		"postcss": "^8.5.1",
+		"tailwindcss": "3.4.17",
+		"typescript": "~5.6.2",
+		"vite": "^6.0.5"
+	}
+}
