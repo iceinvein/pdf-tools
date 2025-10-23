@@ -1,6 +1,6 @@
-import { useState, type DragEvent, type ChangeEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { UploadCloud } from "lucide-react";
+import { type ChangeEvent, type DragEvent, useState } from "react";
 
 interface DragAndDropProps {
 	onFileSelect: (file: File) => void;

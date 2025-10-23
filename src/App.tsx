@@ -1,7 +1,7 @@
-import { useState } from "react";
 import PDFViewer from "@/components/PDFViewer";
-import { ThemeProvider } from "./components/theme-provider";
+import { useState } from "react";
 import DragAndDrop from "./components/DragAndDrop";
+import { ThemeProvider } from "./components/theme-provider";
 import { Toaster } from "./components/ui/sonner";
 
 const App = () => {
