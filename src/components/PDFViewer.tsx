@@ -93,6 +93,7 @@ export default function PDFViewer({ file }: PDFViewerProps) {
 				const renderContext = {
 					canvasContext: context,
 					viewport: viewport,
+					canvas: canvas,
 				};
 
 				// Store the render task so we can cancel it if needed
@@ -180,7 +181,7 @@ export default function PDFViewer({ file }: PDFViewerProps) {
 			newPdf.addPage(copiedPage);
 
 			const pdfBytes = await newPdf.save();
-			const blob = new Blob([pdfBytes], { type: "application/pdf" });
+			const blob = new Blob([new Uint8Array(pdfBytes)], { type: "application/pdf" });
 			const url = URL.createObjectURL(blob);
 
 			const link = document.createElement("a");
@@ -314,7 +315,7 @@ export default function PDFViewer({ file }: PDFViewerProps) {
 		if (!file || !currentPdfBytes) return;
 
 		try {
-			const blob = new Blob([currentPdfBytes], { type: "application/pdf" });
+			const blob = new Blob([new Uint8Array(currentPdfBytes)], { type: "application/pdf" });
 			const url = URL.createObjectURL(blob);
 
 			const link = document.createElement("a");
