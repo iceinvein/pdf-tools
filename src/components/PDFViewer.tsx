@@ -101,11 +101,7 @@ export default function PDFViewer({ file }: PDFViewerProps) {
 				await renderTaskRef.current.promise;
 				renderTaskRef.current = null;
 			} catch (error) {
-				// Ignore cancellation errors
-				if (
-					error instanceof Error &&
-					error.name === "RenderingCancelledException"
-				) {
+				if ((error as any)?.name === "RenderingCancelledException") {
 					return;
 				}
 				console.error("Error rendering page:", error);
@@ -135,13 +131,11 @@ export default function PDFViewer({ file }: PDFViewerProps) {
 		const newPageNum = pageNum + delta;
 		if (newPageNum > 0 && newPageNum <= totalPages) {
 			setPageNum(newPageNum);
-			renderPage(pdfDoc, newPageNum);
 		}
 	};
 
 	const gotoPage = (pageNumber: number) => {
 		setPageNum(pageNumber);
-		renderPage(pdfDoc, pageNumber);
 	};
 
 	const deletePage = async (pageNumber: number) => {
