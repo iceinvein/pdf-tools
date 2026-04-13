@@ -1,24 +1,27 @@
-import { useState } from "react";
-import PDFViewer from "@/components/PDFViewer";
-import DragAndDrop from "./components/DragAndDrop";
+import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { PRIVACY, TOOLS } from "@/lib/tools";
+import PrivacyRoute from "@/routes/PrivacyRoute";
+import ToolRoute from "@/routes/ToolRoute";
 import { ThemeProvider } from "./components/theme-provider";
 import { Toaster } from "./components/ui/sonner";
 
 const App = () => {
-	const [selectedFile, setSelectedFile] = useState<File | null>(null);
-
 	return (
 		<ThemeProvider defaultTheme="system" storageKey="pdf-tools-theme">
-			{!selectedFile ? (
-				<DragAndDrop onFileSelect={setSelectedFile} />
-			) : (
-				<div className="h-dvh flex flex-col bg-paper-workspace overflow-hidden">
-					<PDFViewer
-						file={selectedFile}
-						onClose={() => setSelectedFile(null)}
-					/>
-				</div>
-			)}
+			<BrowserRouter>
+				<Routes>
+					{TOOLS.map((tool) => (
+						<Route
+							key={tool.slug || "home"}
+							path={tool.slug ? `/${tool.slug}` : "/"}
+							element={<ToolRoute tool={tool} />}
+						/>
+					))}
+					<Route path={`/${PRIVACY.slug}`} element={<PrivacyRoute />} />
+					{/* Unknown paths fall back to the home tool, acting as a soft-404. */}
+					<Route path="*" element={<ToolRoute tool={TOOLS[0]} />} />
+				</Routes>
+			</BrowserRouter>
 			<Toaster />
 		</ThemeProvider>
 	);

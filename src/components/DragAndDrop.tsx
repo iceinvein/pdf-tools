@@ -1,6 +1,7 @@
 import {
 	type ChangeEvent,
 	type DragEvent,
+	type ReactNode,
 	useEffect,
 	useRef,
 	useState,
@@ -11,9 +12,28 @@ import { Button } from "@/components/ui/button";
 
 type DragAndDropProps = {
 	onFileSelect: (file: File) => void;
+	/** Tool-specific kicker line (small-caps). Defaults to the generic landing. */
+	kicker?: string;
+	/** Tool-specific H1. Defaults to the generic landing. */
+	h1?: ReactNode;
+	/** Tool-specific sub-copy. Defaults to the generic landing. */
+	blurb?: string;
 };
 
-export default function DragAndDrop({ onFileSelect }: DragAndDropProps) {
+const DEFAULT_H1 = (
+	<>
+		Open a&nbsp;PDF.
+		<br />
+		<span className="text-muted-foreground">Do the thing.</span>
+	</>
+);
+
+export default function DragAndDrop({
+	onFileSelect,
+	kicker = "Local · Browser · No upload",
+	h1 = DEFAULT_H1,
+	blurb = "Drop a file anywhere on this surface, or choose one from your drive. Everything stays on your machine.",
+}: DragAndDropProps) {
 	const [isDragging, setIsDragging] = useState(false);
 	const inputRef = useRef<HTMLInputElement>(null);
 
@@ -90,7 +110,7 @@ export default function DragAndDrop({ onFileSelect }: DragAndDropProps) {
 			{/* Top strip: wordmark + theme toggle */}
 			<header className="flex items-center justify-between px-8 sm:px-12 pt-8 sm:pt-10">
 				<span className="wordmark text-sm text-foreground/80 select-none">
-					pdf<span className="text-primary">·</span>tools
+					quire<span className="text-primary">·</span>pdf
 				</span>
 				<ModeToggle />
 			</header>
@@ -98,19 +118,16 @@ export default function DragAndDrop({ onFileSelect }: DragAndDropProps) {
 			{/* Hero — left-aligned, confident typography, generous whitespace */}
 			<main className="flex-1 flex flex-col justify-center px-8 sm:px-16 lg:px-24 max-w-[72ch]">
 				<p className="text-xs tracking-[0.18em] uppercase text-muted-foreground mb-6">
-					Local · Browser · No upload
+					{kicker}
 				</p>
 				<h1
 					className="font-display font-semibold tracking-tight leading-[0.95] text-foreground"
 					style={{ fontSize: "clamp(2.5rem, 7vw, 5.25rem)" }}
 				>
-					Open a&nbsp;PDF.
-					<br />
-					<span className="text-muted-foreground">Do the thing.</span>
+					{h1}
 				</h1>
 				<p className="mt-8 text-base sm:text-lg text-foreground/70 max-w-[48ch]">
-					Drop a file anywhere on this surface, or choose one from your drive.
-					Everything stays on your machine.
+					{blurb}
 				</p>
 
 				<div className="mt-10 flex flex-wrap items-center gap-4">

@@ -1,0 +1,4 @@
+# Netlify redirects.
+# Tool routes have prerendered HTML in dist/<slug>/index.html, served natively.
+# Anything else falls back to the SPA shell so client-side routing can handle it.
+/*    /index.html   200
