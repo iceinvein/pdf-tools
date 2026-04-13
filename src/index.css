@@ -17,7 +17,7 @@
 	--secondary: oklch(0.955 0.01 50);
 	--secondary-foreground: oklch(0.28 0.03 50);
 	--muted: oklch(0.94 0.01 50);
-	--muted-foreground: oklch(0.5 0.03 50);
+	--muted-foreground: oklch(0.42 0.025 50);
 	--accent: oklch(0.955 0.01 50);
 	--accent-foreground: oklch(0.28 0.03 50);
 	--destructive: oklch(0.55 0.22 27);
@@ -38,6 +38,11 @@
 	--sidebar-accent-foreground: oklch(0.28 0.03 50);
 	--sidebar-border: oklch(0.915 0.01 50);
 	--sidebar-ring: oklch(0.5 0.14 50);
+
+	/* Paper surface for canvas area */
+	--paper: oklch(0.975 0.012 75);
+	--paper-workspace: oklch(0.955 0.012 65);
+	--rule: oklch(0.88 0.012 50);
 }
 
 .dark {
@@ -52,7 +57,7 @@
 	--secondary: oklch(0.25 0.02 50);
 	--secondary-foreground: oklch(0.95 0.006 50);
 	--muted: oklch(0.25 0.02 50);
-	--muted-foreground: oklch(0.65 0.025 50);
+	--muted-foreground: oklch(0.72 0.02 50);
 	--accent: oklch(0.25 0.02 50);
 	--accent-foreground: oklch(0.95 0.006 50);
 	--destructive: oklch(0.65 0.2 25);
@@ -73,6 +78,10 @@
 	--sidebar-accent-foreground: oklch(0.95 0.006 50);
 	--sidebar-border: oklch(0.28 0.015 50);
 	--sidebar-ring: oklch(0.68 0.12 50);
+
+	--paper: oklch(0.26 0.018 55);
+	--paper-workspace: oklch(0.19 0.015 50);
+	--rule: oklch(0.34 0.015 50);
 }
 
 @theme inline {
@@ -112,6 +121,9 @@
 	--color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
 	--color-sidebar-border: var(--sidebar-border);
 	--color-sidebar-ring: var(--sidebar-ring);
+	--color-paper: var(--paper);
+	--color-paper-workspace: var(--paper-workspace);
+	--color-rule: var(--rule);
 	--font-display: "Bricolage Grotesque Variable", system-ui, sans-serif;
 	--font-body: "Atkinson Hyperlegible", system-ui, sans-serif;
 }
@@ -123,6 +135,7 @@
 	body {
 		@apply bg-background text-foreground;
 		font-family: var(--font-body);
+		font-feature-settings: "ss01", "cv11";
 	}
 	h1,
 	h2,
@@ -131,5 +144,73 @@
 	h5,
 	h6 {
 		font-family: var(--font-display);
+		letter-spacing: -0.02em;
+	}
+	/* Hide number input spinners */
+	input[type="number"]::-webkit-inner-spin-button,
+	input[type="number"]::-webkit-outer-spin-button {
+		-webkit-appearance: none;
+		margin: 0;
+	}
+	input[type="number"] {
+		-moz-appearance: textfield;
+	}
+}
+
+@layer components {
+	/* Wordmark — subtle small-caps craft stamp */
+	.wordmark {
+		font-family: var(--font-display);
+		font-weight: 600;
+		letter-spacing: -0.015em;
+		font-variation-settings: "wdth" 85;
+	}
+
+	/* Workshop ruler: faint tick marks along top and left edges of the empty state.
+	   The middle dot is darker every 5 ticks, labelled every 10. Pure decoration
+	   but reads as "precision instrument" rather than dashed drop zone. */
+	.rule-ticks-h {
+		background-image: repeating-linear-gradient(
+			to right,
+			var(--rule) 0 1px,
+			transparent 1px 12px
+		);
+		background-size: 120px 6px;
+		background-repeat: repeat-x;
+		background-position: 0 0;
+		opacity: 0.7;
+	}
+	.rule-ticks-v {
+		background-image: repeating-linear-gradient(
+			to bottom,
+			var(--rule) 0 1px,
+			transparent 1px 12px
+		);
+		background-size: 6px 120px;
+		background-repeat: repeat-y;
+		background-position: 0 0;
+		opacity: 0.7;
+	}
+
+	/* Page surface shadow — a real crafted stack of three low-opacity drop shadows
+	   that feel like paper on a desk, not a CSS box. */
+	.paper-shadow {
+		box-shadow:
+			0 1px 0 oklch(0 0 0 / 0.04),
+			0 2px 4px oklch(0 0 0 / 0.06),
+			0 12px 24px -8px oklch(0 0 0 / 0.12);
+	}
+	.dark .paper-shadow {
+		box-shadow:
+			0 1px 0 oklch(0 0 0 / 0.4),
+			0 2px 8px oklch(0 0 0 / 0.4),
+			0 16px 32px -8px oklch(0 0 0 / 0.5);
+	}
+
+	/* Drop overlay — whole-viewport target state */
+	.dropping {
+		outline: 2px solid var(--primary);
+		outline-offset: -8px;
+		background-color: color-mix(in oklch, var(--primary) 4%, var(--background));
 	}
 }

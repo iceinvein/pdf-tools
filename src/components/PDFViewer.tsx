@@ -1,14 +1,16 @@
-import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import {
+	AlertTriangle,
+	ArrowLeftToLine,
+	ArrowRightToLine,
 	ChevronLeft,
 	ChevronRight,
 	Download,
-	EllipsisVertical,
 	FileDown,
 	FilePlus,
 	Loader2,
 	RotateCcw,
 	Trash2,
+	Undo2,
 	X,
 	ZoomIn,
 	ZoomOut,
@@ -28,10 +30,18 @@ type PDFViewerProps = {
 	onClose: () => void;
 };
 
+/** Snapshot saved on the undo stack before each mutation. */
+type HistoryEntry = {
+	bytes: Uint8Array;
+	pageNum: number;
+	label: string;
+};
+
 export default function PDFViewer({ file, onClose }: PDFViewerProps) {
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 	const renderTaskRef = useRef<RenderTask | null>(null);
 	const pageInputRef = useRef<HTMLInputElement>(null);
+	const thumbRailRef = useRef<HTMLElement>(null);
 
 	const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null);
 	const [pageNum, setPageNum] = useState(1);
@@ -41,6 +51,10 @@ export default function PDFViewer({ file, onClose }: PDFViewerProps) {
 		null,
 	);
 	const [isLoading, setIsLoading] = useState(true);
+	const [loadError, setLoadError] = useState<string | null>(null);
+	const [mutating, setMutating] = useState<null | "delete" | "merge" | "move">(
+		null,
+	);
 	const [confirmingDelete, setConfirmingDelete] = useState(false);
 	const [confirmingClose, setConfirmingClose] = useState(false);
 	const [editingPage, setEditingPage] = useState(false);
@@ -49,6 +63,7 @@ export default function PDFViewer({ file, onClose }: PDFViewerProps) {
 		file: File;
 		pageCount: number;
 	} | null>(null);
+	const [history, setHistory] = useState<HistoryEntry[]>([]);
 
 	const confirmDeleteTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
 		null,
@@ -61,6 +76,7 @@ export default function PDFViewer({ file, onClose }: PDFViewerProps) {
 
 	const loadPDF = useCallback(async (fileOrBytes: File | Uint8Array) => {
 		setIsLoading(true);
+		setLoadError(null);
 		try {
 			let bytes: Uint8Array;
 			if (fileOrBytes instanceof File) {
@@ -79,7 +95,7 @@ export default function PDFViewer({ file, onClose }: PDFViewerProps) {
 			setTotalPages(pdf.numPages);
 		} catch (error) {
 			console.error("Error loading PDF:", error);
-			toast.error(
+			setLoadError(
 				"Could not load this PDF. The file may be corrupted or password-protected.",
 			);
 		} finally {
@@ -137,6 +153,25 @@ export default function PDFViewer({ file, onClose }: PDFViewerProps) {
 		if (pdfDoc && pageNum) renderPage(pdfDoc, pageNum);
 	}, [pdfDoc, pageNum, renderPage]);
 
+	// Auto-center the active chip horizontally in the rail. We compute scrollLeft
+	// directly rather than calling scrollIntoView, which would walk up scrollable
+	// ancestors and drag the page along for the ride.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: pageNum is the intended trigger
+	useEffect(() => {
+		const rail = thumbRailRef.current;
+		if (!rail) return;
+		const active = rail.querySelector<HTMLButtonElement>(
+			'[aria-current="page"]',
+		);
+		if (!active) return;
+		const target =
+			active.offsetLeft + active.offsetWidth / 2 - rail.clientWidth / 2;
+		rail.scrollTo({
+			left: Math.max(0, target),
+			behavior: "smooth",
+		});
+	}, [pageNum]);
+
 	const changePage = useCallback(
 		(delta: number) => {
 			setPageNum((prev) => {
@@ -148,6 +183,31 @@ export default function PDFViewer({ file, onClose }: PDFViewerProps) {
 	);
 
 	const gotoPage = (pageNumber: number) => setPageNum(pageNumber);
+
+	// --- Undo stack ---
+
+	const pushHistory = useCallback(
+		(label: string) => {
+			if (!currentPdfBytes) return;
+			setHistory((h) => [
+				...h,
+				{ bytes: new Uint8Array(currentPdfBytes), pageNum, label },
+			]);
+		},
+		[currentPdfBytes, pageNum],
+	);
+
+	const undo = useCallback(async () => {
+		if (history.length === 0) return;
+		const entry = history[history.length - 1];
+		setHistory((h) => h.slice(0, -1));
+		await loadPDF(entry.bytes);
+		setPageNum(entry.pageNum);
+		// Remain modified if we still have history or have prior edits; treat a full
+		// unwind as "back to original".
+		setIsModified(history.length > 1);
+		toast.success(`Undid: ${entry.label}`);
+	}, [history, loadPDF]);
 
 	// --- Close with unsaved-changes guard ---
 
@@ -203,24 +263,29 @@ export default function PDFViewer({ file, onClose }: PDFViewerProps) {
 	};
 
 	const confirmDelete = async () => {
-		setConfirmingDelete(false);
 		if (confirmDeleteTimeoutRef.current)
 			clearTimeout(confirmDeleteTimeoutRef.current);
 		if (!pdfDoc || totalPages <= 1 || !currentPdfBytes) return;
 
+		setMutating("delete");
 		try {
+			pushHistory(`delete page ${pageNum}`);
 			const pdfLibDoc = await PDFDocument.load(currentPdfBytes);
-			pdfLibDoc.removePage(pageNum - 1);
+			const deletedPage = pageNum;
+			pdfLibDoc.removePage(deletedPage - 1);
 			const modifiedPdfBytes = await pdfLibDoc.save();
 			setIsModified(true);
 
-			const newPageNum = pageNum > 1 ? pageNum - 1 : 1;
+			const newPageNum = deletedPage > 1 ? deletedPage - 1 : 1;
 			await loadPDF(modifiedPdfBytes);
 			setPageNum(newPageNum);
-			toast.success(`Page ${pageNum} deleted.`);
+			toast.success(`Page ${deletedPage} deleted.`);
 		} catch (error) {
 			console.error("Error deleting page:", error);
 			toast.error("Could not delete this page.");
+		} finally {
+			setMutating(null);
+			setConfirmingDelete(false);
 		}
 	};
 
@@ -297,10 +362,11 @@ export default function PDFViewer({ file, onClose }: PDFViewerProps) {
 
 	const confirmMerge = async () => {
 		if (!pendingMerge || !currentPdfBytes) return;
-		const { file: mergeFile } = pendingMerge;
-		setPendingMerge(null);
+		const { file: mergeFile, pageCount } = pendingMerge;
 
+		setMutating("merge");
 		try {
+			pushHistory(`merge ${pageCount} pages from ${mergeFile.name}`);
 			const pdfLibDoc = await PDFDocument.load(currentPdfBytes);
 			const mergeArrayBuffer = await mergeFile.arrayBuffer();
 			const mergePdfDoc = await PDFDocument.load(mergeArrayBuffer);
@@ -322,6 +388,9 @@ export default function PDFViewer({ file, onClose }: PDFViewerProps) {
 		} catch (error) {
 			console.error("Error merging PDFs:", error);
 			toast.error("Could not merge these PDFs.");
+		} finally {
+			setMutating(null);
+			setPendingMerge(null);
 		}
 	};
 
@@ -329,37 +398,46 @@ export default function PDFViewer({ file, onClose }: PDFViewerProps) {
 
 	// --- Reorder ---
 
-	const movePage = async (direction: -1 | 1) => {
-		const targetIndex = pageNum - 1 + direction;
-		if (!currentPdfBytes || targetIndex < 0 || targetIndex >= totalPages)
-			return;
+	const movePage = useCallback(
+		async (direction: -1 | 1) => {
+			const targetIndex = pageNum - 1 + direction;
+			if (!currentPdfBytes || targetIndex < 0 || targetIndex >= totalPages)
+				return;
 
-		try {
-			const pdfLibDoc = await PDFDocument.load(currentPdfBytes);
-			const pages = pdfLibDoc.getPages();
+			setMutating("move");
+			try {
+				pushHistory(
+					`move page ${pageNum} ${direction === -1 ? "earlier" : "later"}`,
+				);
+				const pdfLibDoc = await PDFDocument.load(currentPdfBytes);
+				const pages = pdfLibDoc.getPages();
 
-			const newPdf = await PDFDocument.create();
-			const indices = Array.from({ length: pages.length }, (_, i) => i);
-			[indices[pageNum - 1], indices[targetIndex]] = [
-				indices[targetIndex],
-				indices[pageNum - 1],
-			];
+				const newPdf = await PDFDocument.create();
+				const indices = Array.from({ length: pages.length }, (_, i) => i);
+				[indices[pageNum - 1], indices[targetIndex]] = [
+					indices[targetIndex],
+					indices[pageNum - 1],
+				];
 
-			const copiedPages = await newPdf.copyPages(pdfLibDoc, indices);
-			for (const page of copiedPages) {
-				newPdf.addPage(page);
+				const copiedPages = await newPdf.copyPages(pdfLibDoc, indices);
+				for (const page of copiedPages) {
+					newPdf.addPage(page);
+				}
+
+				const modifiedPdfBytes = await newPdf.save();
+				setIsModified(true);
+				await loadPDF(modifiedPdfBytes);
+				setPageNum(pageNum + direction);
+				toast.success(`Page moved ${direction === -1 ? "earlier" : "later"}.`);
+			} catch (error) {
+				console.error("Error moving page:", error);
+				toast.error("Could not move this page.");
+			} finally {
+				setMutating(null);
 			}
-
-			const modifiedPdfBytes = await newPdf.save();
-			setIsModified(true);
-			await loadPDF(modifiedPdfBytes);
-			setPageNum(pageNum + direction);
-			toast.success(`Page moved ${direction === -1 ? "earlier" : "later"}.`);
-		} catch (error) {
-			console.error("Error moving page:", error);
-			toast.error("Could not move this page.");
-		}
-	};
+		},
+		[currentPdfBytes, pageNum, totalPages, pushHistory, loadPDF],
+	);
 
 	// --- Download / Reset ---
 
@@ -379,6 +457,7 @@ export default function PDFViewer({ file, onClose }: PDFViewerProps) {
 
 	const resetPDF = useCallback(() => {
 		setIsModified(false);
+		setHistory([]);
 		setConfirmingDelete(false);
 		setConfirmingClose(false);
 		loadPDF(file);
@@ -399,10 +478,26 @@ export default function PDFViewer({ file, onClose }: PDFViewerProps) {
 			if (e.target instanceof HTMLInputElement) return;
 			switch (e.key) {
 				case "ArrowLeft":
-					changePage(-1);
+					if ((e.metaKey || e.ctrlKey) && e.shiftKey) {
+						e.preventDefault();
+						movePage(-1);
+					} else {
+						changePage(-1);
+					}
 					break;
 				case "ArrowRight":
-					changePage(1);
+					if ((e.metaKey || e.ctrlKey) && e.shiftKey) {
+						e.preventDefault();
+						movePage(1);
+					} else {
+						changePage(1);
+					}
+					break;
+				case "Home":
+					if (totalPages > 0) setPageNum(1);
+					break;
+				case "End":
+					if (totalPages > 0) setPageNum(totalPages);
 					break;
 				case "=":
 				case "+":
@@ -421,6 +516,12 @@ export default function PDFViewer({ file, onClose }: PDFViewerProps) {
 					if (e.metaKey || e.ctrlKey) {
 						e.preventDefault();
 						downloadPDF();
+					}
+					break;
+				case "z":
+					if (e.metaKey || e.ctrlKey) {
+						e.preventDefault();
+						undo();
 					}
 					break;
 				case "Escape":
@@ -442,119 +543,104 @@ export default function PDFViewer({ file, onClose }: PDFViewerProps) {
 		return () => window.removeEventListener("keydown", handleKey);
 	}, [
 		changePage,
+		movePage,
 		zoomIn,
 		zoomOut,
 		downloadPDF,
+		undo,
+		totalPages,
 		confirmingDelete,
 		confirmingClose,
 		pendingMerge,
 	]);
 
 	const zoomPercent = Math.round(scale * 100);
+	const canUndo = history.length > 0;
 
 	return (
-		<div className="flex flex-col items-center w-full max-w-5xl gap-3">
-			{/* Toolbar */}
-			<div
-				className="w-full flex items-center gap-1.5 p-2 border rounded-lg bg-card overflow-x-auto"
-				role="toolbar"
-				aria-label="PDF toolbar"
-			>
-				{/* File info + close */}
-				<div className="flex items-center gap-2 mr-auto min-w-0">
-					{!confirmingClose ? (
+		<div className="flex-1 min-h-0 flex flex-col w-full max-w-[88rem] mx-auto px-4 sm:px-6 pt-3 pb-4 gap-3">
+			{/* Header strip: file identity + theme + close */}
+			<header className="flex items-center gap-3 min-w-0">
+				<span
+					className="font-display font-medium text-base sm:text-lg truncate min-w-0 flex-1"
+					title={file.name}
+				>
+					{file.name}
+					{isModified && (
+						<span
+							className="text-primary ml-1 select-none"
+							title="Unsaved changes"
+							aria-hidden="true"
+						>
+							•
+						</span>
+					)}
+					{isModified && <span className="sr-only">Unsaved changes</span>}
+				</span>
+				<ModeToggle />
+				{!confirmingClose ? (
+					<Button
+						variant="ghost"
+						size="sm"
+						onClick={handleClose}
+						title="Close file"
+						aria-label="Close file"
+					>
+						<X className="h-4 w-4" />
+					</Button>
+				) : (
+					<div
+						className="flex items-center gap-1 px-2 h-8 rounded-md bg-destructive/10"
+						role="alert"
+					>
+						<span className="text-destructive text-xs font-medium whitespace-nowrap">
+							Unsaved changes
+						</span>
 						<Button
 							variant="ghost"
 							size="sm"
-							onClick={handleClose}
-							title="Close file"
-							aria-label="Close file"
+							onClick={downloadPDF}
+							className="h-7 px-2 text-xs font-medium"
+							title="Save changes before closing"
 						>
-							<X className="h-4 w-4" />
+							Save
 						</Button>
-					) : (
-						<div
-							className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-destructive/10"
-							role="alert"
+						<Button
+							variant="ghost"
+							size="sm"
+							onClick={confirmClose}
+							className="h-7 px-2 text-xs text-destructive hover:bg-destructive/20"
+							title="Discard changes and close"
 						>
-							<span className="text-destructive text-xs font-medium whitespace-nowrap">
-								Unsaved changes
-							</span>
-							<Button
-								variant="ghost"
-								size="sm"
-								onClick={downloadPDF}
-								className="h-7 px-2 text-xs font-medium"
-								title="Save changes before closing"
-							>
-								Save
-							</Button>
-							<Button
-								variant="ghost"
-								size="sm"
-								onClick={confirmClose}
-								className="h-7 px-2 text-xs text-destructive hover:bg-destructive/20"
-								title="Discard changes and close"
-							>
-								Discard
-							</Button>
-							<Button
-								variant="ghost"
-								size="sm"
-								onClick={cancelClose}
-								className="h-7 px-2 text-xs text-muted-foreground hover:bg-muted"
-								title="Cancel"
-							>
-								Cancel
-							</Button>
-						</div>
-					)}
-					{!confirmingClose && (
-						<span className="text-sm font-medium truncate" title={file.name}>
-							{file.name}
-							{isModified && (
-								<span className="text-muted-foreground ml-0.5">*</span>
-							)}
-						</span>
-					)}
-				</div>
+							Discard
+						</Button>
+						<Button
+							variant="ghost"
+							size="sm"
+							onClick={cancelClose}
+							className="h-7 px-2 text-xs text-muted-foreground hover:bg-muted"
+							title="Cancel"
+						>
+							Cancel
+						</Button>
+					</div>
+				)}
+			</header>
 
-				{/* Zoom — hidden on small screens */}
-				<div className="hidden sm:flex items-center gap-1">
-					<Button
-						variant="ghost"
-						size="sm"
-						onClick={zoomOut}
-						title="Zoom out"
-						aria-label="Zoom out"
-					>
-						<ZoomOut className="h-4 w-4" />
-					</Button>
-					<span className="text-xs tabular-nums text-muted-foreground min-w-[3.5ch] text-center">
-						{zoomPercent}%
-					</span>
-					<Button
-						variant="ghost"
-						size="sm"
-						onClick={zoomIn}
-						title="Zoom in"
-						aria-label="Zoom in"
-					>
-						<ZoomIn className="h-4 w-4" />
-					</Button>
-				</div>
-
-				{/* Separator — hidden on small screens with zoom */}
-				<div className="hidden sm:block w-px h-5 bg-border mx-0.5" />
-
-				{/* Page nav */}
-				<div className="flex items-center gap-1">
+			{/* Toolbar: two zones (nav left, actions right). Wraps on narrow screens. */}
+			<div
+				className="flex flex-wrap items-center gap-y-2 gap-x-1 px-1 py-1 border rounded-lg bg-card"
+				role="toolbar"
+				aria-label="PDF toolbar"
+			>
+				{/* Zone A — navigation */}
+				<div className="flex items-center gap-0.5">
 					<Button
 						variant="ghost"
 						size="sm"
 						onClick={() => changePage(-1)}
 						disabled={pageNum <= 1}
-						title="Previous page"
+						title="Previous page (←)"
 						aria-label="Previous page"
 					>
 						<ChevronLeft className="h-4 w-4" />
@@ -564,7 +650,7 @@ export default function PDFViewer({ file, onClose }: PDFViewerProps) {
 						<button
 							type="button"
 							onClick={startEditingPage}
-							className="text-sm tabular-nums text-muted-foreground min-w-16 text-center hover:text-foreground hover:bg-muted rounded px-1 py-0.5 transition-colors cursor-text"
+							className="h-8 text-sm tabular-nums text-muted-foreground min-w-[4.5rem] text-center hover:text-foreground hover:bg-muted rounded px-1 transition-colors cursor-text font-display"
 							title="Click to jump to a page"
 							aria-live="polite"
 						>
@@ -578,7 +664,7 @@ export default function PDFViewer({ file, onClose }: PDFViewerProps) {
 							max={totalPages}
 							defaultValue={pageNum}
 							aria-label="Jump to page"
-							className="w-14 text-sm tabular-nums text-center bg-muted border border-input rounded px-1 py-0.5 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+							className="w-16 h-8 text-sm tabular-nums text-center bg-muted border border-input rounded px-1 font-display"
 							onKeyDown={(e) => {
 								if (e.key === "Enter") commitPageEdit(e.currentTarget.value);
 								if (e.key === "Escape") setEditingPage(false);
@@ -592,91 +678,189 @@ export default function PDFViewer({ file, onClose }: PDFViewerProps) {
 						size="sm"
 						onClick={() => changePage(1)}
 						disabled={pageNum >= totalPages}
-						title="Next page"
+						title="Next page (→)"
 						aria-label="Next page"
 					>
 						<ChevronRight className="h-4 w-4" />
 					</Button>
 				</div>
 
-				{/* Separator */}
-				<div className="w-px h-5 bg-border mx-0.5" />
+				<div className="w-px h-5 bg-border mx-1" />
 
-				{/* Delete — always visible */}
-				{!confirmingDelete ? (
+				{/* Reorder — moves the current page within the document. Paired with the
+				    page indicator because it operates on position, not document content. */}
+				<div className="flex items-center gap-0.5">
 					<Button
 						variant="ghost"
 						size="sm"
-						onClick={requestDelete}
-						disabled={totalPages <= 1}
-						title="Delete current page"
-						aria-label="Delete current page"
-						className="text-destructive hover:text-destructive hover:bg-destructive/10"
+						onClick={() => movePage(-1)}
+						disabled={totalPages <= 1 || pageNum <= 1 || mutating !== null}
+						title="Move this page earlier (⌘⇧←)"
+						aria-label="Move current page earlier"
 					>
-						<Trash2 className="h-4 w-4" />
-						<span className="hidden sm:inline">Delete</span>
+						<ArrowLeftToLine className="h-4 w-4" />
 					</Button>
-				) : (
-					<div
-						className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-destructive/10"
-						role="alert"
-					>
-						<span className="text-destructive text-xs font-medium whitespace-nowrap">
-							Delete page {pageNum}?
-						</span>
-						<Button
-							variant="ghost"
-							size="sm"
-							onClick={confirmDelete}
-							className="h-7 px-2 text-xs font-medium text-destructive hover:bg-destructive/20"
-							title="Confirm delete"
-						>
-							Delete
-						</Button>
-						<Button
-							variant="ghost"
-							size="sm"
-							onClick={cancelDelete}
-							className="h-7 px-2 text-xs text-muted-foreground hover:bg-muted"
-							title="Cancel"
-						>
-							Cancel
-						</Button>
-					</div>
-				)}
-
-				{/* Save — always visible, promoted when modified */}
-				<Button
-					variant={isModified ? "default" : "ghost"}
-					size="sm"
-					onClick={downloadPDF}
-					title="Download PDF (Cmd+S)"
-					aria-label="Download PDF"
-				>
-					<Download className="h-4 w-4" />
-					<span className="hidden sm:inline">Save</span>
-				</Button>
-
-				{/* Reset — visible in toolbar when modified */}
-				{isModified && (
 					<Button
 						variant="ghost"
 						size="sm"
-						onClick={resetPDF}
-						title="Undo all changes"
-						aria-label="Reset to original"
+						onClick={() => movePage(1)}
+						disabled={
+							totalPages <= 1 || pageNum >= totalPages || mutating !== null
+						}
+						title="Move this page later (⌘⇧→)"
+						aria-label="Move current page later"
 					>
-						<RotateCcw className="h-4 w-4" />
+						<ArrowRightToLine className="h-4 w-4" />
 					</Button>
-				)}
+				</div>
 
-				{/* Merge confirmation — inline */}
+				<div className="w-px h-5 bg-border mx-1" />
+
+				<div className="flex items-center gap-0.5">
+					<Button
+						variant="ghost"
+						size="sm"
+						onClick={zoomOut}
+						title="Zoom out (⌘−)"
+						aria-label="Zoom out"
+					>
+						<ZoomOut className="h-4 w-4" />
+					</Button>
+					<span className="text-xs tabular-nums text-muted-foreground min-w-[3.5ch] text-center font-display">
+						{zoomPercent}%
+					</span>
+					<Button
+						variant="ghost"
+						size="sm"
+						onClick={zoomIn}
+						title="Zoom in (⌘+)"
+						aria-label="Zoom in"
+					>
+						<ZoomIn className="h-4 w-4" />
+					</Button>
+				</div>
+
+				{/* Spacer pushes actions to the right on wide screens, wraps on narrow */}
+				<div className="flex-1 min-w-0" />
+
+				{/* Zone B — actions */}
+				<div className="flex items-center gap-0.5">
+					<Button
+						variant="ghost"
+						size="sm"
+						onClick={handleMergePDF}
+						title="Merge another PDF into this one"
+						aria-label="Merge PDF"
+					>
+						<FilePlus className="h-4 w-4" />
+						<span className="hidden md:inline">Merge</span>
+					</Button>
+					<Button
+						variant="ghost"
+						size="sm"
+						onClick={extractCurrentPage}
+						disabled={!pdfDoc}
+						title="Extract current page to a new PDF"
+						aria-label="Extract current page"
+					>
+						<FileDown className="h-4 w-4" />
+						<span className="hidden md:inline">Extract</span>
+					</Button>
+
+					{!confirmingDelete ? (
+						<Button
+							variant="ghost"
+							size="sm"
+							onClick={requestDelete}
+							disabled={totalPages <= 1}
+							title="Delete current page"
+							aria-label="Delete current page"
+							className="text-destructive hover:text-destructive hover:bg-destructive/10"
+						>
+							<Trash2 className="h-4 w-4" />
+							<span className="hidden md:inline">Delete</span>
+						</Button>
+					) : (
+						<div
+							className="flex items-center gap-1 px-2 h-8 rounded-md bg-destructive/10"
+							role="alert"
+						>
+							<span className="text-destructive text-xs font-medium whitespace-nowrap">
+								Delete page {pageNum}?
+							</span>
+							<Button
+								variant="ghost"
+								size="sm"
+								onClick={confirmDelete}
+								disabled={mutating === "delete"}
+								className="h-7 px-2 text-xs font-medium text-destructive hover:bg-destructive/20"
+								title="Confirm delete"
+							>
+								{mutating === "delete" ? (
+									<Loader2 className="h-3 w-3 animate-spin" />
+								) : (
+									"Delete"
+								)}
+							</Button>
+							<Button
+								variant="ghost"
+								size="sm"
+								onClick={cancelDelete}
+								disabled={mutating === "delete"}
+								className="h-7 px-2 text-xs text-muted-foreground hover:bg-muted"
+								title="Cancel"
+							>
+								Cancel
+							</Button>
+						</div>
+					)}
+
+					<Button
+						variant="ghost"
+						size="sm"
+						onClick={undo}
+						disabled={!canUndo}
+						title={
+							canUndo
+								? `Undo (⌘Z) — ${history[history.length - 1].label}`
+								: "Nothing to undo"
+						}
+						aria-label="Undo"
+					>
+						<Undo2 className="h-4 w-4" />
+					</Button>
+
+					<Button
+						variant={isModified ? "default" : "ghost"}
+						size="sm"
+						onClick={downloadPDF}
+						title="Download PDF (⌘S)"
+						aria-label="Download PDF"
+					>
+						<Download className="h-4 w-4" />
+						<span className="hidden md:inline">Save</span>
+					</Button>
+
+					{isModified && (
+						<Button
+							variant="ghost"
+							size="sm"
+							onClick={resetPDF}
+							title="Revert to original file"
+							aria-label="Reset to original"
+						>
+							<RotateCcw className="h-4 w-4" />
+						</Button>
+					)}
+				</div>
+
+				{/* Merge confirmation — stretches across the toolbar when active */}
 				{pendingMerge && (
 					<div
-						className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-primary/5"
+						className="flex items-center gap-1 px-2 h-8 rounded-md bg-primary/5 w-full"
 						role="alert"
 					>
-						<span className="text-xs font-medium whitespace-nowrap">
+						<span className="text-xs font-medium whitespace-nowrap flex-1 truncate">
 							Merge {pendingMerge.pageCount} pages from{" "}
 							<span className="text-foreground">{pendingMerge.file.name}</span>?
 						</span>
@@ -684,15 +868,21 @@ export default function PDFViewer({ file, onClose }: PDFViewerProps) {
 							variant="ghost"
 							size="sm"
 							onClick={confirmMerge}
+							disabled={mutating === "merge"}
 							className="h-7 px-2 text-xs font-medium"
 							title="Confirm merge"
 						>
-							Merge
+							{mutating === "merge" ? (
+								<Loader2 className="h-3 w-3 animate-spin" />
+							) : (
+								"Merge"
+							)}
 						</Button>
 						<Button
 							variant="ghost"
 							size="sm"
 							onClick={cancelMerge}
+							disabled={mutating === "merge"}
 							className="h-7 px-2 text-xs text-muted-foreground hover:bg-muted"
 							title="Cancel"
 						>
@@ -700,106 +890,77 @@ export default function PDFViewer({ file, onClose }: PDFViewerProps) {
 						</Button>
 					</div>
 				)}
-
-				{/* Theme toggle */}
-				<ModeToggle />
-
-				{/* Overflow menu — Radix DropdownMenu for a11y */}
-				<DropdownMenu.Root>
-					<DropdownMenu.Trigger asChild>
-						<Button
-							variant="ghost"
-							size="sm"
-							title="More actions"
-							aria-label="More actions"
-						>
-							<EllipsisVertical className="h-4 w-4" />
-						</Button>
-					</DropdownMenu.Trigger>
-					<DropdownMenu.Portal>
-						<DropdownMenu.Content
-							align="end"
-							sideOffset={4}
-							className="z-20 min-w-40 rounded-lg border bg-card p-1 shadow-md"
-						>
-							<DropdownMenu.Item
-								className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-md outline-none cursor-default data-[highlighted]:bg-accent"
-								onSelect={extractCurrentPage}
-							>
-								<FileDown className="h-4 w-4" /> Extract page
-							</DropdownMenu.Item>
-							{totalPages > 1 && (
-								<>
-									<DropdownMenu.Item
-										className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-md outline-none cursor-default data-[highlighted]:bg-accent data-[disabled]:opacity-50"
-										onSelect={() => movePage(-1)}
-										disabled={pageNum <= 1}
-									>
-										<ChevronLeft className="h-4 w-4" /> Move earlier
-									</DropdownMenu.Item>
-									<DropdownMenu.Item
-										className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-md outline-none cursor-default data-[highlighted]:bg-accent data-[disabled]:opacity-50"
-										onSelect={() => movePage(1)}
-										disabled={pageNum >= totalPages}
-									>
-										<ChevronRight className="h-4 w-4" /> Move later
-									</DropdownMenu.Item>
-								</>
-							)}
-							<DropdownMenu.Item
-								className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-md outline-none cursor-default data-[highlighted]:bg-accent"
-								onSelect={handleMergePDF}
-							>
-								<FilePlus className="h-4 w-4" /> Merge PDF
-							</DropdownMenu.Item>
-						</DropdownMenu.Content>
-					</DropdownMenu.Portal>
-				</DropdownMenu.Root>
 			</div>
 
-			{/* PDF canvas */}
-			<div className="relative w-full h-[calc(100vh-180px)] overflow-auto rounded-lg border bg-muted/30">
-				{isLoading && (
-					<div className="absolute inset-0 flex flex-col items-center justify-center bg-background/80 z-10 gap-3">
+			{/* Canvas workspace — paper on desk */}
+			<div className="relative flex-1 min-h-0 overflow-auto rounded-lg bg-paper-workspace">
+				{isLoading && !loadError && (
+					<div className="absolute inset-0 flex flex-col items-center justify-center bg-background/60 z-10 gap-3 backdrop-blur-sm">
 						<Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-						<p className="text-sm text-muted-foreground">Loading {file.name}</p>
+						<p className="text-sm text-muted-foreground font-display">
+							Loading {file.name}
+						</p>
 					</div>
 				)}
-				<div className="min-w-fit min-h-fit flex items-center justify-center p-4">
-					<canvas ref={canvasRef} className="shadow-sm" />
+
+				{loadError && (
+					<div className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-6 text-center">
+						<AlertTriangle className="h-8 w-8 text-destructive" />
+						<div>
+							<p className="font-display text-base font-medium">
+								This file couldn't be opened.
+							</p>
+							<p className="text-sm text-muted-foreground mt-1 max-w-sm">
+								{loadError}
+							</p>
+						</div>
+						<div className="flex gap-2">
+							<Button variant="outline" size="sm" onClick={() => loadPDF(file)}>
+								Try again
+							</Button>
+							<Button variant="ghost" size="sm" onClick={onClose}>
+								Choose another file
+							</Button>
+						</div>
+					</div>
+				)}
+
+				<div className="min-w-fit min-h-fit flex items-center justify-center p-6 sm:p-10">
+					<canvas
+						ref={canvasRef}
+						className="paper-shadow bg-paper rounded-[2px]"
+					/>
 				</div>
 			</div>
 
-			{/* Page thumbnails — horizontal scroll for manageable page counts */}
-			{totalPages > 1 && totalPages <= 20 && (
+			{/* Page rail — always shown for multi-page docs, virtualized by native scroll */}
+			{totalPages > 1 && (
 				<nav
-					className="flex items-center gap-1 overflow-x-auto max-w-full px-1 pb-1 scrollbar-thin"
+					ref={thumbRailRef}
+					className="flex items-center gap-1 overflow-x-auto px-1 pb-1 scrollbar-thin"
 					aria-label="Page navigation"
 				>
 					{Array.from({ length: totalPages }, (_, i) => {
 						const n = i + 1;
+						const active = pageNum === n;
 						return (
-							<Button
+							<button
+								type="button"
 								key={`page-${n}`}
-								variant={pageNum === n ? "default" : "ghost"}
-								size="sm"
 								onClick={() => gotoPage(n)}
-								className="min-w-9 h-8 text-xs tabular-nums shrink-0"
+								className={`h-8 min-w-9 shrink-0 rounded-md text-xs tabular-nums font-display transition-colors ${
+									active
+										? "bg-primary text-primary-foreground"
+										: "text-muted-foreground hover:bg-muted hover:text-foreground"
+								}`}
 								aria-label={`Go to page ${n}`}
-								aria-current={pageNum === n ? "page" : undefined}
+								aria-current={active ? "page" : undefined}
 							>
 								{n}
-							</Button>
+							</button>
 						);
 					})}
 				</nav>
-			)}
-
-			{/* For larger documents, show a compact page indicator */}
-			{totalPages > 20 && (
-				<p className="text-xs text-muted-foreground">
-					Click the page number above to jump to any page
-				</p>
 			)}
 		</div>
 	);
