@@ -1,55 +1,74 @@
-# PDF Tools
+# Quire
 
-A modern, feature-rich browser-based PDF viewer and editor built with React and TypeScript.
+**Free PDF tools, private, browser-based.** Merge, extract, delete, and reorder PDF pages without uploading them. Your files never leave your device.
 
-## Features
+[**Open Quire →**](https://quire-pdf.netlify.app)
 
-### Viewing
-- 📄 View PDF files with smooth navigation
-- 🔍 Zoom in/out and reset zoom
-- 📑 Page-by-page navigation with pagination
+---
 
-### Editing
-- 🗑️ **Delete pages** - Remove unwanted pages (supports multiple deletions!)
-- � **Exttract pages** - Save individual pages as separate PDF files
-- ⬆️⬇️ **Reorder pages** - Move pages up or down in the document
-- 🔗 **Merge PDFs** - Combine multiple PDF files into one
+## Why it exists
 
-### Management
-- 💾 Download modified PDFs
-- ↩️ Reset to original file
-- 🎨 Dark mode support
+Every other free PDF tool uploads your file to a server. Quire does the work in your browser.
 
-## Installation
+- **No upload.** Files are read, edited, and downloaded entirely on your machine.
+- **No account.** No sign-up, no email, no tracking.
+- **No limits.** No file size cap, no watermark, no per-day quota.
+- **No internet needed after first visit.** The site is a static bundle your browser caches.
+
+## What it does
+
+| Tool | What it's for |
+|------|---------------|
+| [Merge PDFs](https://quire-pdf.netlify.app/merge-pdf) | Combine two or more PDFs into one |
+| [Extract pages](https://quire-pdf.netlify.app/extract-pdf-pages) | Save any single page as its own file |
+| [Delete pages](https://quire-pdf.netlify.app/delete-pdf-pages) | Remove pages you don't need |
+| [Reorder pages](https://quire-pdf.netlify.app/reorder-pdf-pages) | Move a page earlier or later in the document |
+
+Every action is undoable. Nothing is written to disk until you hit download.
+
+## How it works
+
+Two open-source libraries do all the work, both running inside your browser tab:
+
+- **pdf.js** (Mozilla) renders each page onto a canvas so you can see it.
+- **pdf-lib** rewrites the PDF byte stream when you edit.
+
+There is no server component. Open the network tab, drop a PDF, and watch: no outbound requests carry your file.
+
+Read the longer version at [/privacy](https://quire-pdf.netlify.app/privacy).
+
+## Keyboard shortcuts
+
+| Action | Shortcut |
+|--------|----------|
+| Open a file | `Cmd/Ctrl + O` |
+| Navigate pages | `Arrow Left` / `Arrow Right` |
+| Jump to first / last page | `Home` / `End` |
+| Reorder current page | `Cmd/Ctrl + Shift + Arrow` |
+| Zoom in / out | `Cmd/Ctrl + +` / `Cmd/Ctrl + -` |
+| Save | `Cmd/Ctrl + S` |
+| Undo | `Cmd/Ctrl + Z` |
+| Cancel a prompt | `Esc` |
+
+## Running it locally
 
 ```bash
 bun install
-```
-
-## Usage
-
-```bash
 bun dev
 ```
 
-## How to Use
+Dev server runs on `http://localhost:5173`. For a production build with prerendered SEO routes:
 
-1. Drag and drop a PDF file or click "Choose File" to select one
-2. Use the toolbar to manipulate your PDF:
-   - **Zoom controls**: Adjust viewing size
-   - **Extract**: Save current page separately
-   - **Move Up/Down**: Reorder pages
-   - **Merge**: Combine with another PDF
-   - **Delete**: Remove current page
-   - **Download**: Save your modified PDF
-   - **Reset**: Revert all changes
+```bash
+bun run build
+```
 
-## Tech Stack
+Output lands in `dist/`, ready for any static host.
 
-- React 19 + TypeScript
-- Vite 7
-- pdf-lib (PDF manipulation)
-- pdfjs-dist (PDF rendering)
-- Tailwind CSS 4 + shadcn/ui
-- Lucide icons
-- Biome (linting & formatting)
+## Under the hood
+
+Built on React 19, Vite 7, Tailwind v4, and shadcn/ui. Typography pairs Bricolage Grotesque (display) with Atkinson Hyperlegible (body). Routes are prerendered at build time via a small Bun script in `scripts/prerender.ts`; each tool gets its own static HTML with title, canonical, OG tags, and FAQPage JSON-LD so search engines and AI summarizers can index it without running JavaScript.
+
+## License
+
+MIT.
